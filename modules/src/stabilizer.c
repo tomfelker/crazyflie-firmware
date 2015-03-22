@@ -92,6 +92,18 @@ static float uncompensatedMagneticHeading;
 static const float magInterferenceUpdateRate = .1; // higher value for faster correction
 static const float magAndThrustRate = .02; // lower value for more smoothing
 
+// attempts to center the offset
+
+// the strength of earth's magnetic field, in gauss, if the magnetometer gain (specified to +-5%) is right.
+// Note this changes a lot per location, so should be inferred.
+// TODO: use second-derivative of magnetic field (inverse of this), or possibly also use IMU, to help calibrate this.
+static const float magStrength = 0.4; // in gauss
+static const float magCenterRate = .1; // higher for faster movement
+
+static Axis3f magCenter;
+static Axis3f magLongCompensatedCentered;
+
+
 
 static float eulerRollActual;
 static float eulerPitchActual;
@@ -453,13 +465,17 @@ static float deadband(float value, const float threshold)
 
 static float estimateHeading(const Axis3f *mag)
 {
-  return (float)(-180.0f / M_PI) * atan2f(mag->y, mag->x);
+  // TODO: this should take IMU data into account - without that it only works when horizontal.
+  // note that this is heading in the aviation sense, with 0 being north and 90 being east.
+  return (float)(180.0f / M_PI) * atan2f(mag->y, -mag->x);
 }
 
 static float lerp(float t, float from, float to)
 {
   return t * to + (1 - t) * from;
 }
+
+
 
 static void estimateMagnetometerInterference(bool fullUpdate)
 {
@@ -475,27 +491,33 @@ static void estimateMagnetometerInterference(bool fullUpdate)
   }
 
   if (fullUpdate) {
-
+    // update our estimate of the motor's effect on the magnetic field
     float deltaTotalMotorVoltageLong = totalMotorVoltageLong - totalMotorVoltageLongLast;
     totalMotorVoltageLongLast = totalMotorVoltage;
-
-//    for (axis = 0; axis < 3; ++axis) {
-//      magCompensated.v[axis] = mag.v[axis] - magInterference.v[axis] * totalMotorVoltage;
-//    }
-
     for (axis = 0; axis < 3; ++axis) {
       deltaMagLongCompensated.v[axis] = magLongCompensated.v[axis] - magLongCompensatedLast.v[axis];
     }
     magLongCompensatedLast = magLongCompensated;
-
     for (axis = 0; axis < 3; ++axis) {
       interferenceEstimate.v[axis] = deltaMagLongCompensated.v[axis] * deltaTotalMotorVoltageLong;
-
       magInterference.v[axis] += interferenceEstimate.v[axis] * magInterferenceUpdateRate;
     }
+
+    // update the center of the magnetic field
+    Axis3f centerToMag;
+    axis3fSub(&centerToMag, &magLongCompensated, &magCenter);
+    float distFromCenter = axis3fLength(&centerToMag);
+    if(distFromCenter > magStrength) {
+      float distToMove = (distFromCenter - magStrength) * magCenterRate;
+      Axis3f move;
+      axis3fScale(&move, &centerToMag, distToMove / distFromCenter);
+      axis3fAdd(&magCenter, &magCenter, &move);
+    }
+    axis3fSub(&magLongCompensatedCentered, &magLongCompensated, &magCenter);
   }
 
-  compensatedMagneticHeading = estimateHeading(&magLongCompensated);
+
+  compensatedMagneticHeading = estimateHeading(&magLongCompensatedCentered);
   uncompensatedMagneticHeading = estimateHeading(&mag);
 }
 
@@ -538,6 +560,17 @@ LOG_ADD(LOG_FLOAT, y, &magLongCompensated.y)
 LOG_ADD(LOG_FLOAT, z, &magLongCompensated.z)
 LOG_GROUP_STOP(magComp)
 
+LOG_GROUP_START(magCenter)
+LOG_ADD(LOG_FLOAT, x, &magCenter.x)
+LOG_ADD(LOG_FLOAT, y, &magCenter.y)
+LOG_ADD(LOG_FLOAT, z, &magCenter.z)
+LOG_GROUP_STOP(magCenter)
+
+LOG_GROUP_START(magFinal)
+LOG_ADD(LOG_FLOAT, x, &magLongCompensatedCentered.x)
+LOG_ADD(LOG_FLOAT, y, &magLongCompensatedCentered.y)
+LOG_ADD(LOG_FLOAT, z, &magLongCompensatedCentered.z)
+LOG_GROUP_STOP(magFinal)
 
 LOG_GROUP_START(magDebug)
 LOG_ADD(LOG_FLOAT, thrust, &totalMotorVoltageLongLast)

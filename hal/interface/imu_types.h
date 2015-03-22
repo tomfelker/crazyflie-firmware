@@ -27,6 +27,8 @@
 #ifndef IMU_TYPES_H_
 #define IMU_TYPES_H_
 
+#include <math.h>
+
  typedef struct {
          int16_t x;
          int16_t y;
@@ -49,5 +51,49 @@
 		 float v[3];
         };
  } Axis3f;
+
+
+ inline static void axis3fAdd(Axis3f *result, const Axis3f *a, const Axis3f *b)
+ {
+   result->x = a->x + b->x;
+   result->y = a->y + b->y;
+   result->z = a->z + b->z;
+ }
+
+ inline static void axis3fSub(Axis3f *result, const Axis3f *a, const Axis3f *b)
+ {
+   result->x = a->x - b->x;
+   result->y = a->y - b->y;
+   result->z = a->z - b->z;
+ }
+
+ inline static float axis3fLengthSq(const Axis3f *v)
+ {
+   return v->x * v->x + v->y * v->y + v->z * v->z;
+ }
+
+ inline static float axis3fLength(const Axis3f *v)
+ {
+   return sqrtf(axis3fLengthSq(v));
+ }
+
+ inline static float axis3fDistSq(const Axis3f *a, const Axis3f *b)
+ {
+   Axis3f aToB;
+   axis3fSub(&aToB, b, a);
+   return axis3fLengthSq(&aToB);
+ }
+
+ inline static float axis3fDist(const Axis3f *a, const Axis3f *b)
+ {
+   return sqrtf(axis3fDistSq(a, b));
+ }
+
+ inline static void axis3fScale(Axis3f *result, const Axis3f *a, float scale)
+ {
+   result->x = a->x * scale;
+   result->y = a->y * scale;
+   result->z = a->z * scale;
+ }
 
 #endif /* IMU_TYPES_H_ */
