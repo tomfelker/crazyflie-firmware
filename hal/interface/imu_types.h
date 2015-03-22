@@ -40,9 +40,14 @@
  } Axis3i32;
 
  typedef struct {
-         float x;
-         float y;
-         float z;
+         union {
+		 struct {
+                         float x;
+                         float y;
+                         float z;
+                 };
+		 float v[3];
+        };
  } Axis3f;
 
 #endif /* IMU_TYPES_H_ */

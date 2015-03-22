@@ -57,13 +57,41 @@
 #define ATTITUDE_UPDATE_RATE_DIVIDER  2
 #define FUSION_UPDATE_DT  (float)(1.0 / (IMU_UPDATE_FREQ / ATTITUDE_UPDATE_RATE_DIVIDER)) // 250hz
 
+#define MAG_UPDATE_RATE_DIVIDER 500
+
 // Barometer/ Altitude hold stuff
 #define ALTHOLD_UPDATE_RATE_DIVIDER  5 // 500hz/5 = 100hz for barometer measurements
 #define ALTHOLD_UPDATE_DT  (float)(1.0 / (IMU_UPDATE_FREQ / ALTHOLD_UPDATE_RATE_DIVIDER))   // 500hz
 
 static Axis3f gyro; // Gyro axis data in deg/s
 static Axis3f acc;  // Accelerometer axis data in mG
-static Axis3f mag;  // Magnetometer axis data in testla
+static Axis3f mag;  // Magnetometer axis data in tesla
+
+// estimateMagnetometerInterference() stuff
+
+// long-term average of mag, controlled by magAndThrustRate
+static Axis3f magLong;
+// long term average of total motor voltage, controlled by magAndThrustRate
+static float totalMotorVoltageLong;
+
+// our estimate of how much the total motor voltage affects the mag measurements. I sure hope this is linear.
+static Axis3f magInterference;  // units of tesla per thrust (where thrust is volts * power setting).
+
+static Axis3f magLongCompensatedLast;   // value after compensation, updated at the slower update rate
+static Axis3f magLongCompensated;
+
+static float totalMotorVoltageLongLast;
+
+// these don't need to be state, but for debugging
+static Axis3f interferenceEstimate;
+static Axis3f deltaMagLongCompensated;
+
+static float compensatedMagneticHeading;
+static float uncompensatedMagneticHeading;
+
+static const float magInterferenceUpdateRate = .01; // higher value for faster correction
+static const float magAndThrustRate = .5; // lower value for more smoothing
+
 
 static float eulerRollActual;
 static float eulerPitchActual;
@@ -142,6 +170,8 @@ static void stabilizerTask(void* param);
 static float constrain(float value, const float minVal, const float maxVal);
 static float deadband(float value, const float threshold);
 
+static void estimateMagnetometerInterference(bool fullUpdate);
+
 void stabilizerInit(void)
 {
   if(isInit)
@@ -174,10 +204,12 @@ bool stabilizerTest(void)
   return pass;
 }
 
+
 static void stabilizerTask(void* param)
 {
   uint32_t attitudeCounter = 0;
   uint32_t altHoldCounter = 0;
+  uint32_t magCounter = 0;
   uint32_t lastWakeTime;
 
   vTaskSetApplicationTaskTag(0, (void*)TASK_STABILIZER_ID_NBR);
@@ -193,6 +225,8 @@ static void stabilizerTask(void* param)
 
     // Magnetometer not yet used more then for logging.
     imu9Read(&gyro, &acc, &mag);
+
+    estimateMagnetometerInterference(magCounter++ % MAG_UPDATE_RATE_DIVIDER == 0);
 
     if (imu6IsCalibrated())
     {
@@ -417,6 +451,54 @@ static float deadband(float value, const float threshold)
   return value;
 }
 
+static float estimateHeading(const Axis3f *mag)
+{
+  return (float)(-180.0f / M_PI) * atan2f(mag->y, mag->x);
+}
+
+static float lerp(float t, float from, float to)
+{
+  return t * to + (1 - t) * from;
+}
+
+static void estimateMagnetometerInterference(bool fullUpdate)
+{
+  int axis;
+
+  uint32_t totalPwm = motorPowerM1 + motorPowerM2 + motorPowerM3 + motorPowerM4;
+  float totalMotorVoltage = totalPwm * (1.0f / (4.0f * 65535.0f)) * pmGetBatteryVoltage();
+  totalMotorVoltageLong = lerp(magAndThrustRate, totalMotorVoltageLong, totalMotorVoltage);
+
+  for (axis = 0; axis < 3; ++axis) {
+    magLong.v[axis] = lerp(magAndThrustRate, magLong.v[axis], mag.v[axis]);
+    magLongCompensated.v[axis] = magLong.v[axis] - magInterference.v[axis] * totalMotorVoltageLong;
+  }
+
+  if (fullUpdate) {
+
+    float deltaTotalMotorVoltageLong = totalMotorVoltageLong - totalMotorVoltageLongLast;
+    totalMotorVoltageLongLast = totalMotorVoltage;
+
+//    for (axis = 0; axis < 3; ++axis) {
+//      magCompensated.v[axis] = mag.v[axis] - magInterference.v[axis] * totalMotorVoltage;
+//    }
+
+    for (axis = 0; axis < 3; ++axis) {
+      deltaMagLongCompensated.v[axis] = magLongCompensated.v[axis] - magLongCompensatedLast.v[axis];
+    }
+    magLongCompensatedLast = magLongCompensated;
+
+    for (axis = 0; axis < 3; ++axis) {
+      interferenceEstimate.v[axis] = deltaMagLongCompensated.v[axis] * deltaTotalMotorVoltageLong;
+
+      magInterference.v[axis] += interferenceEstimate.v[axis] * magInterferenceUpdateRate;
+    }
+  }
+
+  compensatedMagneticHeading = estimateHeading(&magLongCompensated);
+  uncompensatedMagneticHeading = estimateHeading(&mag);
+}
+
 LOG_GROUP_START(stabilizer)
 LOG_ADD(LOG_FLOAT, roll, &eulerRollActual)
 LOG_ADD(LOG_FLOAT, pitch, &eulerPitchActual)
@@ -443,6 +525,30 @@ LOG_ADD(LOG_FLOAT, x, &mag.x)
 LOG_ADD(LOG_FLOAT, y, &mag.y)
 LOG_ADD(LOG_FLOAT, z, &mag.z)
 LOG_GROUP_STOP(mag)
+
+LOG_GROUP_START(magInt)
+LOG_ADD(LOG_FLOAT, x, &magInterference.x)
+LOG_ADD(LOG_FLOAT, y, &magInterference.y)
+LOG_ADD(LOG_FLOAT, z, &magInterference.z)
+LOG_GROUP_STOP(magInt)
+
+LOG_GROUP_START(magComp)
+LOG_ADD(LOG_FLOAT, x, &magLongCompensated.x)
+LOG_ADD(LOG_FLOAT, y, &magLongCompensated.y)
+LOG_ADD(LOG_FLOAT, z, &magLongCompensated.z)
+LOG_GROUP_STOP(magComp)
+
+
+LOG_GROUP_START(magDebug)
+LOG_ADD(LOG_FLOAT, thrust, &totalMotorVoltageLongLast)
+LOG_ADD(LOG_FLOAT, iex, &interferenceEstimate.x)
+LOG_ADD(LOG_FLOAT, dmcx, &deltaMagLongCompensated.x)
+LOG_GROUP_STOP(magDebug)
+
+LOG_GROUP_START(heading)
+LOG_ADD(LOG_FLOAT, compensated, &compensatedMagneticHeading)
+LOG_ADD(LOG_FLOAT, uncompensated, &uncompensatedMagneticHeading)
+LOG_GROUP_STOP(heading)
 
 LOG_GROUP_START(motor)
 LOG_ADD(LOG_INT32, m4, &motorPowerM4)
