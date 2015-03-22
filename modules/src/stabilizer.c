@@ -57,7 +57,7 @@
 #define ATTITUDE_UPDATE_RATE_DIVIDER  2
 #define FUSION_UPDATE_DT  (float)(1.0 / (IMU_UPDATE_FREQ / ATTITUDE_UPDATE_RATE_DIVIDER)) // 250hz
 
-#define MAG_UPDATE_RATE_DIVIDER 500
+#define MAG_UPDATE_RATE_DIVIDER 100
 
 // Barometer/ Altitude hold stuff
 #define ALTHOLD_UPDATE_RATE_DIVIDER  5 // 500hz/5 = 100hz for barometer measurements
@@ -65,7 +65,7 @@
 
 static Axis3f gyro; // Gyro axis data in deg/s
 static Axis3f acc;  // Accelerometer axis data in mG
-static Axis3f mag;  // Magnetometer axis data in tesla
+static Axis3f mag;  // Magnetometer axis data in gauss
 
 // estimateMagnetometerInterference() stuff
 
@@ -75,7 +75,7 @@ static Axis3f magLong;
 static float totalMotorVoltageLong;
 
 // our estimate of how much the total motor voltage affects the mag measurements. I sure hope this is linear.
-static Axis3f magInterference;  // units of tesla per thrust (where thrust is volts * power setting).
+static Axis3f magInterference;  // units of gauss per thrust (where thrust is volts * power setting).
 
 static Axis3f magLongCompensatedLast;   // value after compensation, updated at the slower update rate
 static Axis3f magLongCompensated;
@@ -89,8 +89,8 @@ static Axis3f deltaMagLongCompensated;
 static float compensatedMagneticHeading;
 static float uncompensatedMagneticHeading;
 
-static const float magInterferenceUpdateRate = .01; // higher value for faster correction
-static const float magAndThrustRate = .5; // lower value for more smoothing
+static const float magInterferenceUpdateRate = .1; // higher value for faster correction
+static const float magAndThrustRate = .02; // lower value for more smoothing
 
 
 static float eulerRollActual;
