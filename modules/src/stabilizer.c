@@ -102,7 +102,6 @@ static Axis3f interferenceEstimate;
 static Axis3f deltaMagLongCompensated;
 
 static float compensatedMagneticHeading;
-static float uncompensatedMagneticHeading;
 
 static const float magInterferenceUpdateRate = .1; // higher value for faster correction
 static const float magAndTorqueRate = .02; // lower value for more smoothing
@@ -118,7 +117,7 @@ static const float magCenterRate = .1; // higher for faster movement
 static Axis3f magCenter;
 static Axis3f magLongCompensatedCentered;
 
-
+static const float magImuCorrectionRate = .0001;
 
 static float eulerRollActual;
 static float eulerPitchActual;
@@ -493,21 +492,6 @@ static float normalizeAngle180(float angle)
   return angle;
 }
 
-static float normalizeAngle360(float angle)
-{
-  if (angle < 0.0f)
-  {
-    do {
-      angle += 360.0f;
-    } while (angle < 0.0f);
-  } else if (angle >= 360.0f) {
-    do {
-      angle -= 360.0f;
-    } while (angle >= 360.0f);
-  }
-  return angle;
-}
-
 // note: this heading is in degrees, and compatible with Crazyflie's yaw convention,
 // which is the opposite of the map / aviation convention.
 static float estimateHeadingSimple(const Axis3f *mag)
@@ -515,14 +499,15 @@ static float estimateHeadingSimple(const Axis3f *mag)
   return (float)(180.0f / M_PI) * atan2f(mag->y, mag->x);
 }
 
-static float estimateHeading(const Axis3f *mag)
+static float estimateHeadingAndAdjustWorldFrame(const Axis3f *mag)
 {
   Axis3f magInWorld;
 
-  magInWorld= sensfusion6BodyToWorld(*mag);
+  magInWorld = sensfusion6BodyToWorld(*mag);
 
-  // TODO: sensor fusion should drive this to zero over time by rotating its quaternion.
-  float magYawInWorld = estimateHeadingSimple(&magInWorld);
+  float magYawInWorld = normalizeAngle180(estimateHeadingSimple(&magInWorld));
+
+  sensorfusion6RotateWorldFrame( magYawInWorld * magImuCorrectionRate);
 
   float roll, pitch, yaw;
   sensfusion6GetEulerRPY(&roll, &pitch, &yaw);
@@ -581,8 +566,7 @@ static void estimateMagnetometerInterference(bool fullUpdate)
 
   axis3fSub(&magLongCompensatedCentered, &magLongCompensated, &magCenter);
 
-  compensatedMagneticHeading = estimateHeading(&magLongCompensatedCentered);
-  //uncompensatedMagneticHeading = estimateHeading(&mag);
+  compensatedMagneticHeading = estimateHeadingAndAdjustWorldFrame(&magLongCompensatedCentered);
 }
 
 LOG_GROUP_START(stabilizer)
@@ -644,7 +628,6 @@ LOG_GROUP_STOP(magDebug)
 
 LOG_GROUP_START(heading)
 LOG_ADD(LOG_FLOAT, compensated, &compensatedMagneticHeading)
-LOG_ADD(LOG_FLOAT, uncompensated, &uncompensatedMagneticHeading)
 LOG_GROUP_STOP(heading)
 
 LOG_GROUP_START(motor)

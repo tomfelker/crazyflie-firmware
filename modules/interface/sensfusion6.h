@@ -37,4 +37,6 @@ float sensfusion6GetAccZWithoutGravity(const float ax, const float ay, const flo
 
 Axis3f sensfusion6BodyToWorld(Axis3f body);
 
+void sensorfusion6RotateWorldFrame(float yaw);
+
 #endif /* SENSORFUSION6_H_ */

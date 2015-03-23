@@ -262,6 +262,20 @@ Axis3f sensfusion6BodyToWorld(Axis3f body)
   return quatfTransformAxis3f(quatf(q0, q1, q2, q3), body);
 }
 
+void sensorfusion6RotateWorldFrame(float yaw)
+{
+  float minusYawRadiansOverTwo = yaw * (float)(-M_PI / 360.0f);
+  Quatf worldRotation = quatf(cosf(minusYawRadiansOverTwo), 0, 0, sinf(minusYawRadiansOverTwo));
+
+  Quatf bodyToWorld = quatf(q0, q1, q2, q3);
+  Quatf bodyToRotatedWorld = quatfHamiltonProduct(worldRotation, bodyToWorld);
+
+  q0 = bodyToRotatedWorld.a;
+  q1 = bodyToRotatedWorld.b;
+  q2 = bodyToRotatedWorld.c;
+  q3 = bodyToRotatedWorld.d;
+}
+
 //---------------------------------------------------------------------------------------------------
 // Fast inverse square-root
 // See: http://en.wikipedia.org/wiki/Fast_inverse_square_root
