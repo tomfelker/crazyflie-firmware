@@ -71,8 +71,23 @@ static Axis3f mag;  // Magnetometer axis data in gauss
 
 // long-term average of mag, controlled by magAndThrustRate
 static Axis3f magLong;
-// long term average of total motor voltage, controlled by magAndThrustRate
+
+
+// long term average of total motor voltage, which serves as an estimate of total motor speed
 static float totalMotorVoltageLong;
+
+static float totalTorque; // only here for debugging
+
+// smoothed version of the total torque estimate, controlled by magAndThrustRate
+static float totalTorqueLong;
+
+// To match the duration of computed torque overshoots to the duration of the magnetic disturbance's overshoot.
+// Controls the smoothing of smooths totalMotorVoltageLong.
+// Probably some function of propeller drag, mass, and motor power.
+static const float torqueEquilibriumFactor = .03;  // lower for slower torque decay
+// To match the amplitude of computed torque overshoots to the amplitude of the magnetic disturbance's overshoot.
+// Probably some function of the motor's KV and loaded max speed.
+static const float torqueFactor = .3;
 
 // our estimate of how much the total motor voltage affects the mag measurements. I sure hope this is linear.
 static Axis3f magInterference;  // units of gauss per thrust (where thrust is volts * power setting).
@@ -80,7 +95,7 @@ static Axis3f magInterference;  // units of gauss per thrust (where thrust is vo
 static Axis3f magLongCompensatedLast;   // value after compensation, updated at the slower update rate
 static Axis3f magLongCompensated;
 
-static float totalMotorVoltageLongLast;
+static float totalTorqueLongLast;
 
 // these don't need to be state, but for debugging
 static Axis3f interferenceEstimate;
@@ -90,7 +105,7 @@ static float compensatedMagneticHeading;
 static float uncompensatedMagneticHeading;
 
 static const float magInterferenceUpdateRate = .1; // higher value for faster correction
-static const float magAndThrustRate = .02; // lower value for more smoothing
+static const float magAndTorqueRate = .02; // lower value for more smoothing
 
 // attempts to center the offset
 
@@ -463,11 +478,12 @@ static float deadband(float value, const float threshold)
   return value;
 }
 
+// note: this heading is in degrees, and compatible with Crazyflie's yaw convention,
+// which is the opposite of the map / aviation convention.
 static float estimateHeading(const Axis3f *mag)
 {
   // TODO: this should take IMU data into account - without that it only works when horizontal.
-  // note that this is heading in the aviation sense, with 0 being north and 90 being east.
-  return (float)(180.0f / M_PI) * atan2f(mag->y, -mag->x);
+  return (float)(-180.0f / M_PI) * atan2f(mag->y, -mag->x);
 }
 
 static float lerp(float t, float from, float to)
@@ -483,23 +499,26 @@ static void estimateMagnetometerInterference(bool fullUpdate)
 
   uint32_t totalPwm = motorPowerM1 + motorPowerM2 + motorPowerM3 + motorPowerM4;
   float totalMotorVoltage = totalPwm * (1.0f / (4.0f * 65535.0f)) * pmGetBatteryVoltage();
-  totalMotorVoltageLong = lerp(magAndThrustRate, totalMotorVoltageLong, totalMotorVoltage);
+  totalMotorVoltageLong = lerp(torqueEquilibriumFactor, totalMotorVoltageLong, totalMotorVoltage);
+
+  totalTorque = totalMotorVoltage + torqueFactor * (totalMotorVoltage - totalMotorVoltageLong);
+  totalTorqueLong = lerp(magAndTorqueRate, totalTorqueLong, totalTorque);
 
   for (axis = 0; axis < 3; ++axis) {
-    magLong.v[axis] = lerp(magAndThrustRate, magLong.v[axis], mag.v[axis]);
-    magLongCompensated.v[axis] = magLong.v[axis] - magInterference.v[axis] * totalMotorVoltageLong;
+    magLong.v[axis] = lerp(magAndTorqueRate, magLong.v[axis], mag.v[axis]);
+    magLongCompensated.v[axis] = magLong.v[axis] - magInterference.v[axis] * totalTorqueLong; // not sure about using Long version here.  Maybe use one version for algorithm and another for output.
   }
 
   if (fullUpdate) {
     // update our estimate of the motor's effect on the magnetic field
-    float deltaTotalMotorVoltageLong = totalMotorVoltageLong - totalMotorVoltageLongLast;
-    totalMotorVoltageLongLast = totalMotorVoltage;
+    float deltaTotalTorqueLong = totalMotorVoltageLong - totalTorqueLongLast;
+    totalTorqueLongLast = totalTorque;
     for (axis = 0; axis < 3; ++axis) {
       deltaMagLongCompensated.v[axis] = magLongCompensated.v[axis] - magLongCompensatedLast.v[axis];
     }
     magLongCompensatedLast = magLongCompensated;
     for (axis = 0; axis < 3; ++axis) {
-      interferenceEstimate.v[axis] = deltaMagLongCompensated.v[axis] * deltaTotalMotorVoltageLong;
+      interferenceEstimate.v[axis] = deltaMagLongCompensated.v[axis] * deltaTotalTorqueLong;
       magInterference.v[axis] += interferenceEstimate.v[axis] * magInterferenceUpdateRate;
     }
 
@@ -513,9 +532,9 @@ static void estimateMagnetometerInterference(bool fullUpdate)
       axis3fScale(&move, &centerToMag, distToMove / distFromCenter);
       axis3fAdd(&magCenter, &magCenter, &move);
     }
-    axis3fSub(&magLongCompensatedCentered, &magLongCompensated, &magCenter);
   }
 
+  axis3fSub(&magLongCompensatedCentered, &magLongCompensated, &magCenter);
 
   compensatedMagneticHeading = estimateHeading(&magLongCompensatedCentered);
   uncompensatedMagneticHeading = estimateHeading(&mag);
@@ -573,7 +592,7 @@ LOG_ADD(LOG_FLOAT, z, &magLongCompensatedCentered.z)
 LOG_GROUP_STOP(magFinal)
 
 LOG_GROUP_START(magDebug)
-LOG_ADD(LOG_FLOAT, thrust, &totalMotorVoltageLongLast)
+LOG_ADD(LOG_FLOAT, thrust, &totalTorque)
 LOG_ADD(LOG_FLOAT, iex, &interferenceEstimate.x)
 LOG_ADD(LOG_FLOAT, dmcx, &deltaMagLongCompensated.x)
 LOG_GROUP_STOP(magDebug)
