@@ -256,6 +256,12 @@ float sensfusion6GetAccZWithoutGravity(const float ax, const float ay, const flo
   // (A dot G) / |G| - 1G (|G| = 1) -> (A dot G) - 1G
   return ((ax*gx + ay*gy + az*gz) - 1.0);
 }
+
+Axis3f sensfusion6BodyToWorld(Axis3f body)
+{
+  return quatfTransformAxis3f(quatf(q0, q1, q2, q3), body);
+}
+
 //---------------------------------------------------------------------------------------------------
 // Fast inverse square-root
 // See: http://en.wikipedia.org/wiki/Fast_inverse_square_root

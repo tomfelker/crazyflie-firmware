@@ -26,6 +26,46 @@
  */
 #define DEBUG_MODULE "IMU"
 
+/*
+ * Coordinate systems:
+ *
+ * In most of the CF2 code:
+ *      X is forwards, towards the antenna
+ *      Y is left, towards the flashing green light
+ *      Z is up, away from earth
+ *      ...this is considered "right handed"
+ * And for euler angles:
+ *      Yaw is positive when turning left (right-hand-rule around Z)
+ *      Pitch is positive when "pulling up" (going backwards) (left-hand-rule around Y)
+ *      Roll is positive when making a right turn (right-hand-rule around X)
+ *      ...and they are applied in that order to bring the plane from world space to its position.
+ *
+ * The MPU-9250 (U9) is oriented:
+ *      on the top side, just left of center
+ *      with pin 1 on the back-right corner
+ *      according to PCB markings:
+ *              X is left
+ *              Y is backwards
+ *              Z is up
+ *      and this is fixed in imu6Read() by switching X and Y, and then negating the new X,
+ *      so that it matches the above system.
+ * However, the compass has a different coordinate system, despite being part of the MPU-9250.
+ *      according to the datasheet, if pin1 were in the upper left corner and you were looking down at the chip,
+ *              X is forwards (towards the edge with Pin 1 on the left)
+ *              Y is left (clockwise from X)
+ *              Z is down (towards the PCB).
+ *      thus, on the Crazyflie,
+ *              X is backwards
+ *              Y is left
+ *              Z is down
+ *      and it is fixed in imu9Read() by negating X and Z.
+ */
+
+
+
+
+
+
 #include <math.h>
 
 #include "stm32fxxx.h"
@@ -59,7 +99,9 @@
 #define IMU_VARIANCE_MAN_TEST_TIMEOUT M2T(1000) // Timeout in ms
 #define IMU_MAN_TEST_LEVEL_MAX        5.0      // Max degrees off
 
-#define MAG_GAUSS_PER_LSB     666.7
+// datasheet for MPU-9250A says typ. 0.6 uT/LSB, which is 0.006 gauss/LSB.
+// AK8963 datasheed also has BIT="1" mode, 0.15 uT/LSB, which is 0.0015 gauss/LSB.
+#define MAG_GAUSS_PER_LSB     0.0015f
 
 #define IMU_STARTUP_TIME_MS   1000
 
@@ -381,6 +423,9 @@ bool imu6IsCalibrated(void)
   return status;
 }
 
+// gyroOut is deg/s
+// accOut is in g
+// magOut is in gauss
 void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut)
 {
   imu6Read(gyroOut, accOut);
@@ -389,9 +434,9 @@ void imu9Read(Axis3f* gyroOut, Axis3f* accOut, Axis3f* magOut)
   {
     ak8963GetHeading(&mag.x, &mag.y, &mag.z);
     ak8963GetOverflowStatus();
-    magOut->x = (float)mag.x / MAG_GAUSS_PER_LSB;
-    magOut->y = (float)mag.y / MAG_GAUSS_PER_LSB;
-    magOut->z = (float)mag.z / MAG_GAUSS_PER_LSB;
+    magOut->x = (float)mag.x * -MAG_GAUSS_PER_LSB;
+    magOut->y = (float)mag.y *  MAG_GAUSS_PER_LSB;
+    magOut->z = (float)mag.z * -MAG_GAUSS_PER_LSB;
   }
   else
   {

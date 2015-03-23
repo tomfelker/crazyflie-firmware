@@ -27,6 +27,7 @@
 #ifndef IMU_TYPES_H_
 #define IMU_TYPES_H_
 
+#include <stdint.h>
 #include <math.h>
 
  typedef struct {
@@ -52,6 +53,14 @@
         };
  } Axis3f;
 
+ static inline Axis3f axis3f(float x, float y, float z)
+ {
+   Axis3f ret;
+   ret.x = x;
+   ret.y = y;
+   ret.z = z;
+   return ret;
+ }
 
  inline static void axis3fAdd(Axis3f *result, const Axis3f *a, const Axis3f *b)
  {
@@ -94,6 +103,68 @@
    result->x = a->x * scale;
    result->y = a->y * scale;
    result->z = a->z * scale;
+ }
+
+ typedef struct {
+   // represents the quaternion a + b*i + c*j + d*k
+   float a; // real
+   float b; // i
+   float c; // j
+   float d; // k
+ } Quatf;
+
+ static inline Quatf quatf(float a, float b, float c, float d)
+ {
+   Quatf ret;
+   ret.a = a;
+   ret.b = b;
+   ret.c = c;
+   ret.d = d;
+   return ret;
+ }
+
+ // note: I'm somewhat undecided as to whether these should pass by value or by const pointer,
+ // and whether they should return by value and by pointer.  I'm hoping the compiler just does its magic either way.
+
+ static inline Quatf quatfConjugate(Quatf q)
+ {
+   return quatf(q.a, -q.b, -q.c, -q.d);
+ }
+
+ static inline Quatf quatfHamiltonProduct(Quatf q1, Quatf q2)
+ {
+   return quatf(
+       q1.a * q2.a - q1.b * q2.b - q1.c * q2.c - q1.d * q2.d,
+       q1.a * q2.b + q1.b * q2.a + q1.c * q2.d - q1.d * q2.c,
+       q1.a * q2.c - q1.b * q2.d + q1.c * q2.a + q1.d * q2.b,
+       q1.a * q2.d + q1.b * q2.c - q1.c * q2.b + q1.d * q2.a
+       );
+ }
+
+ static inline Quatf axis3fToQuatf(Axis3f v)
+ {
+   return quatf(0, v.x, v.y, v.z);
+ }
+
+ static inline Axis3f quatfPureQuatToAxis3f(Quatf q)
+ {
+   return axis3f(q.b, q.c, q.d);
+ }
+
+ static inline Axis3f quatfTransformAxis3f(Quatf q, Axis3f v)
+ {
+   Quatf p = axis3fToQuatf(v);
+   Quatf qPrime = quatfConjugate(q);
+   Quatf result = quatfHamiltonProduct(quatfHamiltonProduct(q, p), qPrime);
+   return quatfPureQuatToAxis3f(result);
+ }
+
+ static inline Axis3f quatfInverseTransformAxis3f(Quatf q, Axis3f v)
+ {
+   Quatf p = axis3fToQuatf(v);
+   Quatf qPrime = quatfConjugate(q);
+   Quatf result = quatfHamiltonProduct(quatfHamiltonProduct(qPrime, p), q);
+   return quatfPureQuatToAxis3f(result);
  }
 
 #endif /* IMU_TYPES_H_ */
